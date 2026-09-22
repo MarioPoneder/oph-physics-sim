@@ -27,6 +27,8 @@ from oph_fpe.core.echosahedral_dynamics import (
 )
 from oph_fpe.core.icosahedral import icosahedral_a5_port_permutations
 
+from oph_fpe.bulk.primitive_source_instruments import instrument_control
+
 ROOT = Path(__file__).resolve().parents[2]
 PLAN = ((4, 4, 1), (4, 8, 1), (4, 16, 1), (4, 32, 1),
         (8, 16, 1), (16, 16, 1), (4, 16, 2))
@@ -146,7 +148,7 @@ def quantum_control():
 
 
 def produce():
-    packet = {"schema": "oph.primitive-source-reads.v1",
+    packet = {"schema": "oph.primitive-source-reads.v2",
         "source": {"repository": "https://github.com/muellerberndt/oph-physics-sim",
                    "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                    "files": source_files()},
@@ -154,6 +156,7 @@ def produce():
                   "M1_derived": False, "record_channel": "local_numeric_ledger_payload",
                   "global_custody_hash_is_local_readout": False},
         "cases": [case(*spec) for spec in PLAN], "quantum": quantum_control()}
+    packet["instruments"] = instrument_control(packet["cases"])
     packet["sha256"] = hashlib.sha256(canonical(packet)).hexdigest()
     return packet
 

@@ -362,12 +362,198 @@ def quantum(row):
             "equal_input_intensities_output_gap_lower_bound": str(bound),
             "intensity_only_markov_closure": False,
             "uniform_feedback_equivariant": False,
+            "analytic_reversible_port_algebra_complex_dimension": 144,
+            "coordinate_ports_central_in_reversible_closure": False,
             "native_next_port": predicted, "rotated_next_port": perm[predicted]}
 
 
+def cadd(a, b):
+    return a[0]+b[0], a[1]+b[1]
+
+
+def cmul(a, b):
+    return a[0]*b[0]-a[1]*b[1], a[0]*b[1]+a[1]*b[0]
+
+
+def read_sparse(rows, expected):
+    if type(rows) is not list or any(type(r) is not list or len(r) != 4 for r in rows):
+        raise ValueError("sparse density shape")
+    equal([r[:2] for r in rows], [list(p) for p in sorted(expected)], "complete sparse density support")
+    for i, j, re_part, im_part in rows:
+        for actual, target in zip((re_part, im_part), expected[i, j]):
+            if abs(F(hex_number(actual))-target) > F(1, 2**45):
+                raise ValueError("Kraus channel output")
+
+
+def instruments(row, cases, quantum_row):
+    keys(row, "threshold_input_hex threshold_output_hex phase_lift_coherence_hex twirl_output_sparse dephased_output_sparse next_read_hex extensions_selected_by_source measured_recurrence")
+    equal(row["extensions_selected_by_source"], False, "instrument selection boundary")
+    delta = 2.0**-51
+    points = [[.5+i*delta, .5-i*delta] for i in range(3)]
+    outputs = [points[0], points[1], [.5, .5]]
+    equal(row["threshold_input_hex"], [[v.hex() for v in p] for p in points], "affinity witness inputs")
+    equal(row["threshold_output_hex"], [[v.hex() for v in p] for p in outputs], "native threshold affinity witness")
+    if not (2*delta <= 1e-15 < 4*delta):
+        raise ValueError("threshold witness straddling")
+    n, size = cases[2]["carriers"], 12*cases[2]["carriers"]
+    pairs = [(a,b) for _,a,b in cases[2]["seams"]]
+    expected_lift = [math.sqrt(13)/(24*n)]*2+[7/(24*n), -7/(24*n)]
+    lift = row["phase_lift_coherence_hex"]
+    if type(lift) is not list or len(lift) != 4 or any(type(z) is not list or len(z) != 2 for z in lift):
+        raise ValueError("phase lift witness shape")
+    for z, target in zip(lift, expected_lift):
+        if abs(hex_number(z[0])-target) > 2**-45 or abs(hex_number(z[1])) > 2**-45:
+            raise ValueError("native phase lift ensemble witness")
+    neighbor = quantum_row["phase_ports"][1]
+    zero = (F(0),F(0))
+    rho = {(i,i):(F(1,12*n),F(0)) for i in range(12,size)}
+    rho[0,0] = rho[neighbor,neighbor] = (F(1,2*n),F(0))
+    rho[0,neighbor],rho[neighbor,0] = (F(0),-F(1,2*n)),(F(0),F(1,2*n))
+    # Independent exact Gaussian-rational Kraus action, including coherences.
+    for a,b in pairs:
+        swap = lambda i: b if i == a else a if i == b else i
+        permuted = {(swap(i),swap(j)):z for (i,j),z in rho.items()}
+        both = {p:tuple(v/2 for v in cadd(rho.get(p,zero),permuted.get(p,zero)))
+                for p in rho.keys()|permuted.keys()}
+        rho = {p:z for p,z in both.items() if z != zero}
+    dephased = {p:z for p,z in rho.items() if p[0] == p[1]}
+    read_sparse(row["twirl_output_sparse"], rho)
+    read_sparse(row["dephased_output_sparse"], dephased)
+    U = [[tuple(F(hex_number(v)) for v in z) for z in line] for line in quantum_row["unitary_hex"]]
+    def next_probability(state):
+        result = zero
+        for (i,j), z in state.items():
+            if i < 12 and j < 12:
+                result = cadd(result,cmul(cmul(U[0][i],z),(U[0][j][0],-U[0][j][1])))
+        if result[1] != 0:
+            raise ValueError("nonreal channel probability")
+        return result[0]
+    expected = [next_probability(state) for state in (rho,dephased)]
+    if type(row["next_read_hex"]) is not list or len(row["next_read_hex"]) != 2:
+        raise ValueError("channel read shape")
+    actual = [F(hex_number(v)) for v in row["next_read_hex"]]
+    if any(abs(a-b) > F(1,2**44) for a,b in zip(actual,expected)):
+        raise ValueError("subsequent native unitary reads")
+    t=F(1,131072)
+    gap=(2*t-400*t*t)/(8*n)
+    if actual[1]-actual[0] <= gap:
+        raise ValueError("missing channel extension ambiguity")
+    recurrence = row["measured_recurrence"]
+    if type(recurrence) is not list or len(recurrence) != 3:
+        raise ValueError("recurrence family")
+    return {"threshold_affinity_defect": str(F(1,2**51)),
+            "phase_lift_ensemble_coherence_gap_lower_bound": str(F(1,8*n)),
+            "ideal_repair_CPTP_extensions": 2,
+            "subsequent_read_gap_lower_bound": str(gap),
+            "native_threshold_rule_is_quantum_channel": False,
+            "phase_preserving_lift_is_quantum_channel": False,
+            "extensions_selected_by_source": False,
+            "measured_recurrence": [verify_recurrence(r,c,U) for r,c in zip(recurrence,(cases[2],cases[4],cases[5]))]}
+
+
+def verify_recurrence(row, case_row, U):
+    keys(row, "carriers steps coarse_target coarse_input_ports coarse_transition_hex erasure")
+    n, size = case_row["carriers"], 12*case_row["carriers"]
+    equal(row["carriers"], n, "recurrence population")
+    mate = {a:b for _,a,b in case_row["seams"]}|{b:a for _,a,b in case_row["seams"]}
+    graph = [{mate[12*c+p]//12 for p in range(12)} for c in range(n)]
+    distances = []
+    for c in range(n):
+        ds = {c:0}; queue = [c]
+        for v in queue:
+            for w in sorted(graph[v]-ds.keys()):
+                ds[w] = ds[v]+1; queue.append(w)
+        if len(ds) != n:
+            raise ValueError("disconnected carrier graph")
+        distances.append([ds[d] for d in range(n)])
+    one = [{12*c+p for c in (i//12,mate[i]//12) for p in range(12)} for i in range(size)]
+    current = [{i} for i in range(size)]
+    expected_steps = []
+    for k in range(1,5):
+        current = [set().union(*(current[j] for j in sources)) for sources in one]
+        formula = [{12*d+q for d in range(n) for q in range(12)
+                    if min(distances[i//12][d],distances[mate[i]//12][d]) <= k-1}
+                   for i in range(size)]
+        if current != formula:
+            raise ValueError("slot propagation ball theorem")
+        raw = bytes(int(j in current[i]) for i in range(size) for j in range(size))
+        counts = [len(set().union(*(current[12*c+p] for p in range(12))))//12 for c in range(n)]
+        if counts != [sum(d <= k for d in ds) for ds in distances]:
+            raise ValueError("carrier propagation ball theorem")
+        expected_steps.append({"step":k,"slot_support_sha256":hashlib.sha256(raw).hexdigest(),
+                               "positive_slot_entries":sum(map(len,current)),"carrier_influence_counts":counts})
+    equal(row["steps"], expected_steps, "executed measured recurrence support")
+    target=mate[0]//12
+    other=next(p for p in range(1,12) if mate[p]//12 != target)
+    equal(row["coarse_target"], target, "coarse target")
+    equal(row["coarse_input_ports"], [0,other], "coarse input ports")
+    expected = [sum((U[p][q][0]**2+U[p][q][1]**2)/2 for p in range(12)
+                    if mate[12*target+p]//12 == 0) for q in (0,other)]
+    if type(row["coarse_transition_hex"]) is not list or len(row["coarse_transition_hex"]) != 2:
+        raise ValueError("coarse transition shape")
+    actual=[F(hex_number(v)) for v in row["coarse_transition_hex"]]
+    if any(abs(a-b)>F(1,2**44) for a,b in zip(actual,expected)):
+        raise ValueError("coarse transition probability")
+    d=F(20,131072)
+    lower=(1-2*d-10*d*d)/2
+    if actual[0]-actual[1] < lower:
+        raise ValueError("missing carrier lumpability obstruction")
+    erasure = row["erasure"]
+    keys(erasure, "cycle_flow inverse_flow_hex first_outputs_hex")
+    flow = [0]*size
+    carrier, port, visited = 0, 0, set()
+    while carrier not in visited:
+        visited.add(carrier)
+        slot = 12*carrier+port
+        flow[slot],flow[mate[slot]] = 1,-1
+        carrier,port = mate[slot]//12,1-port
+    if carrier != 0 or len(visited) != n:
+        raise ValueError("alternating Hamiltonian circulation")
+    equal(erasure["cycle_flow"],flow,"complete normalized erasure flow")
+    if any(flow[i]+flow[mate[i]] for i in range(size)) or any(sum(flow[12*c:12*(c+1)]) for c in range(n)):
+        raise ValueError("flow is not a normalized repair kernel")
+    if type(erasure["inverse_flow_hex"]) is not list or len(erasure["inverse_flow_hex"]) != size:
+        raise ValueError("inverse flow shape")
+    inverse = [F(hex_number(v)) for v in erasure["inverse_flow_hex"]]
+    B = [[z[0]**2+z[1]**2 for z in line] for line in U]
+    bound=F(1,2**40)
+    propagated=[sum(B[p][q]*inverse[12*c+q] for q in range(12)) for c in range(n) for p in range(12)]
+    if max(abs(a-b) for a,b in zip(propagated,flow)) > bound or max(map(abs,inverse))>2:
+        raise ValueError("native Born inverse circulation residual")
+    if any(abs(sum(inverse[12*c:12*(c+1)]))>bound for c in range(n)):
+        raise ValueError("normalized inverse circulation")
+    preps=[[F(1,12)+sign*v/48 for v in inverse] for sign in (1,-1)]
+    if min(min(v) for v in preps) < F(1,24):
+        raise ValueError("nonpositive erasure preparation")
+    outputs=erasure["first_outputs_hex"]
+    if type(outputs) is not list or len(outputs)!=2 or any(type(v) is not list or len(v)!=size for v in outputs):
+        raise ValueError("erasure output shape")
+    actual=[[F(hex_number(v)) for v in line] for line in outputs]
+    for state,result in zip(preps,actual):
+        local=[sum(B[p][q]*state[12*c+q] for q in range(12)) for c in range(n) for p in range(12)]
+        expected=[(local[i]+local[mate[i]])/2 for i in range(size)]
+        if max(abs(a-b) for a,b in zip(expected,result))>bound:
+            raise ValueError("first measured-cycle erasure replay")
+    if max(abs(a-b) for a,b in zip(*actual))>bound:
+        raise ValueError("first cycle failed to erase the intervention")
+    # Rank on normalized preparations: the antisymmetric pair coordinates
+    # obey the connected carrier incidence equations, of rank N-1.
+    incidence=[[0]*(6*n) for _ in range(n)]
+    for e,(_,a,b) in enumerate(case_row["seams"]):
+        incidence[a//12][e],incidence[b//12][e]=1,-1
+    equal(rank(incidence),n-1,"connected incidence rank")
+    return {"carriers":n,"carrier_graph_diameter":max(map(max,distances)),
+            "steps":expected_steps,"carrier_totals_are_Markov_state":False,
+            "coarse_transition_gap_lower_bound":str(lower),
+            "normalized_first_cycle_kernel_dimension":5*n+1,
+            "normalized_first_cycle_image_dimension":6*n-1,
+            "inverse_and_replay_numerical_residual_bound":str(bound),
+            "exact_real_erasure_is_analytic":True}
+
+
 def verify(packet, source_root=None):
-    keys(packet, "schema source scope cases quantum sha256")
-    equal(packet["schema"], "oph.primitive-source-reads.v1", "schema")
+    keys(packet, "schema source scope cases quantum instruments sha256")
+    equal(packet["schema"], "oph.primitive-source-reads.v2", "schema")
     equal(packet["scope"], {"driver": "registered_all_port_capture", "complete_A1_A3": False,
         "M1_derived": False, "record_channel": "local_numeric_ledger_payload",
         "global_custody_hash_is_local_readout": False}, "scope")
@@ -378,7 +564,8 @@ def verify(packet, source_root=None):
     if type(source["revision"]) is not str or not re.fullmatch("[0-9a-f]{40}", source["revision"]):
         raise ValueError("source revision")
     files = source["files"]
-    required = {"oph_fpe/bulk/primitive_source_reads.py", "oph_fpe/bulk/physical_h3_kms_source_capture.py",
+    required = {"oph_fpe/bulk/primitive_source_reads.py", "oph_fpe/bulk/primitive_source_instruments.py",
+                "oph_fpe/bulk/physical_h3_kms_source_capture.py",
                 "oph_fpe/bulk/verify_primitive_source_reads_independent.py", "oph_fpe/core/echosahedral_dynamics.py"}
     if type(files) is not dict or not required <= set(files):
         raise ValueError("source closure")
@@ -403,7 +590,8 @@ def verify(packet, source_root=None):
     for i in range(3):
         equal(packet["cases"][i+1]["cycle_counts"][:specs[i][1]], packet["cases"][i]["cycle_counts"], "actual execution prefix")
     return {"schema": 1, "packet_sha256": packet["sha256"], "cases": rows,
-            "quantum": quantum(packet["quantum"]), "M1_derived": False,
+            "quantum": quantum(packet["quantum"]),
+            "instruments": instruments(packet["instruments"], packet["cases"], packet["quantum"]), "M1_derived": False,
             "source_bytes_checked": source_root is not None,
             "history_extension_is_spatial_refinement": False}
 

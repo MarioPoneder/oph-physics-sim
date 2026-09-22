@@ -67,3 +67,36 @@ population, canonical A3 optimizer or full-axiom countermodel is asserted.
 The analytic proofs, Lean reductions, claim classification and captured
 publication artifact are developed in the companion
 [OPH source-operation derivation](https://github.com/MarioPoneder/observer-patch-holography/blob/research/source-operation-reads/code/source_operation_reads/DERIVATION.md).
+
+## Recurrent instrument controls
+
+Schema v2 also calls the exact pair primitive and terminal projection used
+by the registered driver. Their extraction preserves the existing native
+arithmetic; no propagation stage is inserted into that driver. The no-op
+band violates affinity on three exactly representable states. The terminal
+phase lift violates equal density-ensemble equivalence under the stated
+block encoding. Neither is an exact quantum channel on those inputs.
+
+`primitive_source_instruments.py` implements explicit CPTP *controls*: a
+product of seam-swap twirls and its dephased version. They have identical
+ideal diagonal repairs and different subsequent native-unitary reads.
+They are not selected by the source or substituted for the registered rule.
+The companion proof kernel checks CPTP for permutation twirling and
+coordinate dephasing. A full sparse rational replay checks the coherences;
+Choi tests include a positive but non-CP transpose control.
+
+Repeating the measured extension derives a graph-distance influence cone.
+The verifier compares actual matrix powers with Boolean composition and
+an independent shortest-path formula. Influence is not exact record
+recovery: the first measured cycle has a 5N+1-dimensional kernel on
+per-carrier normalized inputs. An explicit alternating-cycle circulation
+produces two positive inputs with the same ideal output. The native inverse
+and output calculation is checked to a stated numerical residual, not
+claimed to be exact floating-point equality. Port populations also fail the
+carrier-only Markov closure criterion. These are tests of a specified
+extension; no Euclidean radius, population or full A1--A3 family is selected.
+
+The native unitary and coordinate probes generate the full M12 algebra,
+so the same twelve coordinate projectors cannot be A1's central records.
+The companion derivation explains the required separation of quantum state
+and stored classical outcomes.

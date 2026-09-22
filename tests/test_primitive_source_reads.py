@@ -52,6 +52,19 @@ def test_native_driver_binding_and_complete_replay(packet):
     (("quantum", "laplacian", 0, 0), 4),
     (("quantum", "uniform_snapshot_feedback", "native_next_port"), 0),
     (("quantum", "uniform_snapshot_feedback", "stabilizer_permutation"), list(range(12))),
+    (("instruments", "threshold_output_hex", 1, 0), "0x1.0000000000000p-1"),
+    (("instruments", "phase_lift_coherence_hex", 0, 0), "0x0.0p+0"),
+    (("instruments", "twirl_output_sparse"), []),
+    (("instruments", "dephased_output_sparse"), []),
+    (("instruments", "next_read_hex", 0), "0x0.0p+0"),
+    (("instruments", "extensions_selected_by_source"), True),
+    (("instruments", "measured_recurrence", 2, "steps", 1, "positive_slot_entries"), 0),
+    (("instruments", "measured_recurrence", 2, "steps", 2, "slot_support_sha256"), "0"*64),
+    (("instruments", "measured_recurrence", 2, "coarse_transition_hex", 0), "0x0.0p+0"),
+    (("instruments", "measured_recurrence"), []),
+    (("instruments", "measured_recurrence", 0, "erasure", "cycle_flow"), [0]*48),
+    (("instruments", "measured_recurrence", 0, "erasure", "inverse_flow_hex"), ["0x0.0p+0"]*48),
+    (("instruments", "measured_recurrence", 0, "erasure", "first_outputs_hex", 0, 0), "0x0.0p+0"),
     (("cases",), []),
 ])
 def test_resealed_forgery(packet, path, value):
@@ -154,3 +167,71 @@ def test_skipped_pairs_are_not_committed_record_parents(packet):
     result = check.case(row, (4,16,1))
     assert result["observer_payload"]["repair_to_record_edges"] == []
     assert result["maximum_version"] == 0
+
+
+def test_native_threshold_has_an_exact_affinity_defect():
+    from oph_fpe.bulk.physical_h3_kms_source_capture import _visible_pair_mean
+    delta = 2.0**-51
+    def first(x):
+        mean = _visible_pair_mean(x, 1-x)
+        return x if mean is None else mean
+    assert first(.5+delta)-(first(.5)+first(.5+2*delta))/2 == delta
+
+
+def test_terminal_lift_keeps_the_registered_arithmetic():
+    import numpy as np
+    from oph_fpe.bulk.physical_h3_kms_source_capture import _terminal_complex_lift
+    values = np.array([[0, 1, -1, 1j, -1j, 1+1j, -1-1j, 2, 3, 4, 5, 6]], dtype=complex)
+    visible = np.arange(12).reshape(1,12)/16
+    expected = np.sqrt(np.maximum(visible,0))*np.exp(1j*np.angle(values))
+    assert np.array_equal(_terminal_complex_lift(values,visible), expected)
+
+
+def test_quantum_extensions_have_positive_choi_and_correct_partial_trace():
+    import numpy as np
+    from oph_fpe.bulk.primitive_source_instruments import pair_twirl
+    size=4
+    pairs=[(0,1),(2,3)]
+    def choi(channel):
+        blocks=[]
+        for i in range(size):
+            line=[]
+            for j in range(size):
+                unit=np.zeros((size,size),dtype=complex);unit[i,j]=1
+                line.append(channel(unit))
+            blocks.append(line)
+        return np.block(blocks)
+    for channel in (lambda x: pair_twirl(x,pairs),
+                    lambda x: np.diag(np.diag(pair_twirl(x,pairs)))):
+        matrix=choi(channel)
+        assert np.linalg.eigvalsh(matrix).min() >= -1e-13
+        partial=np.einsum('iaja->ij',matrix.reshape(size,size,size,size))
+        assert np.array_equal(partial,np.eye(size))
+    # A positive trace-preserving map is not enough: this catches transpose.
+    assert np.linalg.eigvalsh(choi(lambda x:x.T)).min() < -.9
+
+
+@pytest.mark.parametrize('bad', [None, [], [(0,1)], [(0,1),(1,2)], [(0,1),(2,True)], [(0,1,2),(3,)]])
+def test_channel_extension_rejects_incomplete_or_invalid_matchings(bad):
+    import numpy as np
+    from oph_fpe.bulk.primitive_source_instruments import pair_twirl
+    with pytest.raises(ValueError):
+        pair_twirl(np.eye(4),bad)
+
+
+def test_same_diagonal_repairs_do_not_fix_future_reads(packet):
+    result=check.verify(packet)['instruments']
+    assert F(result['subsequent_read_gap_lower_bound'])>0
+    assert result['native_threshold_rule_is_quantum_channel'] is False
+    assert result['extensions_selected_by_source'] is False
+    assert all(r['carrier_totals_are_Markov_state'] is False for r in result['measured_recurrence'])
+
+
+def test_pair_iterators_are_not_consumed_before_channel_execution():
+    import numpy as np
+    from oph_fpe.bulk.primitive_source_instruments import pair_twirl
+    matrix=np.diag([1,0,0,0])
+    result=pair_twirl(matrix,iter([(0,1),(2,3)]))
+    assert np.array_equal(result,np.diag([.5,.5,0,0]))
+    with pytest.raises(ValueError):
+        pair_twirl(np.empty((0,0)),[])
