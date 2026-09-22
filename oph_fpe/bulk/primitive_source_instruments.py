@@ -8,6 +8,8 @@ import hashlib
 
 import numpy as np
 
+from oph_fpe.bulk.primitive_source_archive import archive_control
+
 from oph_fpe.bulk.physical_h3_kms_source_capture import (
     _terminal_complex_lift, _visible_pair_mean,
 )
@@ -16,8 +18,8 @@ from oph_fpe.core.echosahedral_dynamics import (
 )
 
 
-def pair_twirl(matrix, pairs):
-    """Compose (rho + S rho S*)/2 for disjoint, exhaustive slot transpositions."""
+def validated_matching(matrix, pairs):
+    """Validate a finite matrix and materialize its complete slot matching."""
     rho = np.array(matrix, dtype=complex, copy=True)
     if rho.ndim != 2 or rho.shape[0] < 2 or rho.shape[0] != rho.shape[1] or not np.all(np.isfinite(rho)):
         raise ValueError("finite square matrix required")
@@ -31,6 +33,25 @@ def pair_twirl(matrix, pairs):
     slots = [p for pair in pairs for p in pair]
     if any(type(p) is not int for p in slots) or sorted(slots) != list(range(size)):
         raise ValueError("disjoint exhaustive slot matching required")
+    return rho, pairs
+
+
+def flagged_pair_repair(matrix, pairs, flags):
+    """Apply one recorded unitary branch; the flag is extra retained state."""
+    rho, pairs = validated_matching(matrix, pairs)
+    if type(flags) is not list or len(flags) != len(pairs) or any(type(x) is not int or x not in (0,1) for x in flags):
+        raise ValueError("one exact binary flag per seam required")
+    perm = np.arange(len(rho))
+    for (a,b), flag in zip(pairs,flags):
+        if flag:
+            perm[a],perm[b]=b,a
+    return rho[np.ix_(perm,perm)]
+
+
+def pair_twirl(matrix, pairs):
+    """Compose (rho + S rho S*)/2 for disjoint, exhaustive slot transpositions."""
+    rho,pairs=validated_matching(matrix,pairs)
+    size=len(rho)
     for a, b in pairs:
         perm = np.arange(size)
         perm[a], perm[b] = b, a
@@ -83,6 +104,15 @@ def instrument_control(cases):
     rho[:12, :12] = 0
     rho[0, 0] = rho[neighbor, neighbor] = 1/(2*n)
     rho[0, neighbor], rho[neighbor, 0] = -1j/(2*n), 1j/(2*n)
+    flags = [[0]*len(pairs),[1]*len(pairs)]
+    flags += [[int(i == j) for i in range(len(pairs))] for j in range(len(pairs))]
+    flags += [[i%2 for i in range(len(pairs))]]
+    retained = []
+    for word in flags:
+        branch=flagged_pair_repair(rho,pairs,word)
+        restored=flagged_pair_repair(branch,pairs,word)
+        retained.append({"flags":word,"branch_digest":matrix_digest(branch),
+                         "recovered_digest":matrix_digest(restored)})
     coherent = pair_twirl(rho, pairs)
     measured = np.diag(np.diag(coherent))
     next_reads = [float((unitary@state[:12, :12]@unitary.conj().T)[0, 0].real)
@@ -93,7 +123,8 @@ def instrument_control(cases):
             "twirl_output_sparse": sparse(coherent),
             "dephased_output_sparse": sparse(measured),
             "next_read_hex": [v.hex() for v in next_reads],
-            "extensions_selected_by_source": False,
+            "extensions_selected_by_source": False, "retained_flags":retained,
+            "deterministic_archive": [archive_control(c) for c in (cases[2], cases[4], cases[5])],
             "measured_recurrence": [recurrence_control(c, unitary) for c in (cases[2], cases[4], cases[5])]}
 
 
@@ -140,3 +171,12 @@ def recurrence_control(row, unitary):
             "erasure": {"cycle_flow":flow.tolist(),
                         "inverse_flow_hex":[float(v).hex() for v in inverse],
                         "first_outputs_hex":[[float(v).hex() for v in x] for x in terminal]}}
+
+
+def matrix_digest(matrix):
+    """Exact numeric hash; a signed zero is the same zero matrix entry."""
+    from fractions import Fraction
+    import json
+    rows=[[i,j,str(Fraction(float(z.real))),str(Fraction(float(z.imag)))]
+          for i,line in enumerate(matrix) for j,z in enumerate(line) if z != 0]
+    return hashlib.sha256((json.dumps(rows,separators=(",",":"))+"\n").encode("ascii")).hexdigest()

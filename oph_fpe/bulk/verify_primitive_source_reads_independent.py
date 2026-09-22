@@ -386,7 +386,7 @@ def read_sparse(rows, expected):
 
 
 def instruments(row, cases, quantum_row):
-    keys(row, "threshold_input_hex threshold_output_hex phase_lift_coherence_hex twirl_output_sparse dephased_output_sparse next_read_hex extensions_selected_by_source measured_recurrence")
+    keys(row, "threshold_input_hex threshold_output_hex phase_lift_coherence_hex twirl_output_sparse dephased_output_sparse next_read_hex extensions_selected_by_source measured_recurrence retained_flags deterministic_archive")
     equal(row["extensions_selected_by_source"], False, "instrument selection boundary")
     delta = 2.0**-51
     points = [[.5+i*delta, .5-i*delta] for i in range(3)]
@@ -409,6 +409,29 @@ def instruments(row, cases, quantum_row):
     rho = {(i,i):(F(1,12*n),F(0)) for i in range(12,size)}
     rho[0,0] = rho[neighbor,neighbor] = (F(1,2*n),F(0))
     rho[0,neighbor],rho[neighbor,0] = (F(0),-F(1,2*n)),(F(0),F(1,2*n))
+    original = dict(rho)
+    words = [[0]*len(pairs),[1]*len(pairs)]
+    words += [[int(i == j) for i in range(len(pairs))] for j in range(len(pairs))]
+    words += [[i%2 for i in range(len(pairs))]]
+    flags = row["retained_flags"]
+    if type(flags) is not list or len(flags)!=len(words):
+        raise ValueError("complete retained-flag control family")
+    def native_digest(state):
+        # The producer initializes these rational entries in binary64 before
+        # applying exact permutations. Account for that conversion explicitly.
+        data=[[i,j,str(F(float(z[0]))),str(F(float(z[1])))] for (i,j),z in sorted(state.items())]
+        return hashlib.sha256(canonical(data)).hexdigest()
+    for record,word in zip(flags,words):
+        keys(record,"flags branch_digest recovered_digest")
+        equal(record["flags"],word,"retained branch word")
+        perm=list(range(size))
+        for (a,b),flag in zip(pairs,word):
+            if flag: perm[a],perm[b]=b,a
+        if any(perm[perm[i]] != i for i in range(size)):
+            raise ValueError("flagged branch inverse")
+        branch={(perm[i],perm[j]):z for (i,j),z in original.items()}
+        equal(record["branch_digest"],native_digest(branch),"executed flagged branch")
+        equal(record["recovered_digest"],native_digest(original),"exact retained-flag recovery")
     # Independent exact Gaussian-rational Kraus action, including coherences.
     for a,b in pairs:
         swap = lambda i: b if i == a else a if i == b else i
@@ -441,14 +464,63 @@ def instruments(row, cases, quantum_row):
     recurrence = row["measured_recurrence"]
     if type(recurrence) is not list or len(recurrence) != 3:
         raise ValueError("recurrence family")
-    return {"threshold_affinity_defect": str(F(1,2**51)),
+    archives = row["deterministic_archive"]
+    if type(archives) is not list or len(archives) != 3:
+        raise ValueError("complete deterministic archive controls")
+    archive_results = [verify_archive(r,c) for r,c in zip(archives,(cases[2],cases[4],cases[5]))]
+    return {"deterministic_archive":archive_results, "threshold_affinity_defect": str(F(1,2**51)),
             "phase_lift_ensemble_coherence_gap_lower_bound": str(F(1,8*n)),
             "ideal_repair_CPTP_extensions": 2,
+            "retained_flag_controls":len(words), "retained_flag_bits_per_full_sweep":len(pairs),
+            "all_flag_words_recover_input_analytically":True,
             "subsequent_read_gap_lower_bound": str(gap),
             "native_threshold_rule_is_quantum_channel": False,
             "phase_preserving_lift_is_quantum_channel": False,
             "extensions_selected_by_source": False,
             "measured_recurrence": [verify_recurrence(r,c,U) for r,c in zip(recurrence,(cases[2],cases[4],cases[5]))]}
+
+
+
+def verify_archive(row, case_row):
+    keys(row, "carriers tree_seams initial means chord_differences recovered_sha256")
+    n,seams=case_row['carriers'],case_row['seams']
+    equal(row['carriers'],n,'archive population')
+    weights=[[1+((c+1)*(p+3))%17 for p in range(12)] for c in range(n)]
+    state=[F(w,sum(line)) for line in weights for w in line]
+    equal(row['initial'],list(map(str,state)),'exact archive preparation')
+    means=list(state)
+    for _,a,b in seams: means[a]=means[b]=(state[a]+state[b])/2
+    equal(row['means'],list(map(str,means)),'deterministic ideal means')
+    tree=row['tree_seams']
+    if type(tree) is not list or len(tree)!=n-1 or any(type(e) is not int or not 0<=e<len(seams) for e in tree) or len(set(tree))!=len(tree):
+        raise ValueError('tree seam indices')
+    # Gaussian elimination is independent of the producer's leaf decoder.
+    incidence=[[F(int(a//12==c)-int(b//12==c)) for _,a,b in seams] for c in range(n)]
+    tree_matrix=[[line[e] for e in tree] for line in incidence[:-1]]
+    if rank(tree_matrix)!=n-1: raise ValueError('archive is not a spanning tree')
+    chords={e:(state[a]-state[b])/2 for e,(_,a,b) in enumerate(seams) if e not in tree}
+    equal(row['chord_differences'],[[e,str(v)] for e,v in sorted(chords.items())],'complete retained differences')
+    rhs=[1-sum(means[12*c:12*c+12])-sum(incidence[c][e]*v for e,v in chords.items()) for c in range(n)]
+    matrix=[line+[b] for line,b in zip(tree_matrix,rhs)]
+    for j in range(n-1):
+        k=next(i for i in range(j,n-1) if matrix[i][j])
+        matrix[j],matrix[k]=matrix[k],matrix[j]
+        matrix[j]=[x/matrix[j][j] for x in matrix[j]]
+        for i in range(n-1):
+            if i!=j:
+                coefficient=matrix[i][j]
+                matrix[i]=[x-coefficient*y for x,y in zip(matrix[i],matrix[j])]
+    differences=dict(chords)|{e:matrix[j][-1] for j,e in enumerate(tree)}
+    if any(sum(incidence[c][e]*v for e,v in differences.items())!=1-sum(means[12*c:12*c+12]) for c in range(n)):
+        raise ValueError('complete normalized reconstruction')
+    recovered=list(means)
+    for e,(_,a,b) in enumerate(seams):
+        recovered[a]+=differences[e];recovered[b]-=differences[e]
+    if recovered!=state: raise ValueError('archive failed exact inversion')
+    equal(row['recovered_sha256'],hashlib.sha256(canonical(list(map(str,recovered)))).hexdigest(),'executed archive recovery')
+    return {'carriers':n,'retained_real_coordinates':len(chords),
+            'linear_archive_minimum':5*n+1,'exact_input_recovered':True,
+            'native_record_interface':False}
 
 
 def verify_recurrence(row, case_row, U):
@@ -564,7 +636,7 @@ def verify(packet, source_root=None):
     if type(source["revision"]) is not str or not re.fullmatch("[0-9a-f]{40}", source["revision"]):
         raise ValueError("source revision")
     files = source["files"]
-    required = {"oph_fpe/bulk/primitive_source_reads.py", "oph_fpe/bulk/primitive_source_instruments.py",
+    required = {"oph_fpe/bulk/primitive_source_reads.py", "oph_fpe/bulk/primitive_source_instruments.py", "oph_fpe/bulk/primitive_source_archive.py",
                 "oph_fpe/bulk/physical_h3_kms_source_capture.py",
                 "oph_fpe/bulk/verify_primitive_source_reads_independent.py", "oph_fpe/core/echosahedral_dynamics.py"}
     if type(files) is not dict or not required <= set(files):

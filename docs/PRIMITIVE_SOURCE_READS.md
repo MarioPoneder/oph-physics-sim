@@ -100,3 +100,15 @@ The native unitary and coordinate probes generate the full M12 algebra,
 so the same twelve coordinate projectors cannot be A1's central records.
 The companion derivation explains the required separation of quantum state
 and stored classical outcomes.
+
+
+The continuation now executes two retained-record constructions. On ideal
+population means, a spanning-tree decoder reconstructs all normalized input
+slots from the means and the 5N+1 non-tree seam differences. An independent
+Gaussian-elimination decoder checks exact rational controls at N=4,8,16.
+This is a minimal linear archive of real coordinates, not a finite-bit or
+local read claim. On the quantum twirl, binary swap flags retain invertible
+unitary branches; conditional inversion recovers every matrix. Only the
+unconditional branch average reproduces the deterministic mean. Its flags
+alone are independent of the preparation. Neither construction changes
+the native record interface or claims canonical A1--A3 selection.

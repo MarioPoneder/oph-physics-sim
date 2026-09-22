@@ -65,6 +65,16 @@ def test_native_driver_binding_and_complete_replay(packet):
     (("instruments", "measured_recurrence", 0, "erasure", "cycle_flow"), [0]*48),
     (("instruments", "measured_recurrence", 0, "erasure", "inverse_flow_hex"), ["0x0.0p+0"]*48),
     (("instruments", "measured_recurrence", 0, "erasure", "first_outputs_hex", 0, 0), "0x0.0p+0"),
+    (("instruments", "retained_flags"), []),
+    (("instruments", "retained_flags", 2, "flags", 0), True),
+    (("instruments", "retained_flags", 1, "branch_digest"), "0"*64),
+    (("instruments", "retained_flags", 1, "recovered_digest"), "0"*64),
+    (("instruments", "deterministic_archive"), []),
+    (("instruments", "deterministic_archive", 2, "chord_differences"), []),
+    (("instruments", "deterministic_archive", 2, "tree_seams"), [0]*15),
+    (("instruments", "deterministic_archive", 2, "means", 0), "0"),
+    (("instruments", "deterministic_archive", 2, "initial", 0), "0"),
+    (("instruments", "deterministic_archive", 2, "recovered_sha256"), "0"*64),
     (("cases",), []),
 ])
 def test_resealed_forgery(packet, path, value):
@@ -235,3 +245,49 @@ def test_pair_iterators_are_not_consumed_before_channel_execution():
     assert np.array_equal(result,np.diag([.5,.5,0,0]))
     with pytest.raises(ValueError):
         pair_twirl(np.empty((0,0)),[])
+
+
+def test_all_flag_branches_recover_and_average_to_the_twirl():
+    import itertools
+    import numpy as np
+    from oph_fpe.bulk.primitive_source_instruments import flagged_pair_repair, pair_twirl
+    pairs=[(0,1),(2,3)]
+    words=list(map(list,itertools.product((0,1),repeat=2)))
+    # A complete matrix-unit basis tests the superoperators, including coherence.
+    for i,j in itertools.product(range(4),repeat=2):
+        unit=np.zeros((4,4),dtype=complex);unit[i,j]=1
+        branches=[flagged_pair_repair(unit,pairs,w) for w in words]
+        assert np.array_equal(sum(branches)/4,pair_twirl(unit,pairs))
+        for word,branch in zip(words,branches):
+            assert np.array_equal(flagged_pair_repair(branch,pairs,word),unit)
+
+
+@pytest.mark.parametrize('flags', [None, [], [0], [0,2], [True,0], [0.,1], (0,1)])
+def test_retained_flag_api_rejects_invalid_words(flags):
+    import numpy as np
+    from oph_fpe.bulk.primitive_source_instruments import flagged_pair_repair
+    with pytest.raises(ValueError):
+        flagged_pair_repair(np.eye(4),[(0,1),(2,3)],flags)
+
+
+@pytest.mark.parametrize('n', [4,8,16])
+def test_minimal_difference_archive_reconstructs_arbitrary_positive_inputs(n):
+    import random
+    from oph_fpe.bulk.primitive_source_archive import recover, tree_seams
+    seams=produce.case(n,16,1)['seams']
+    tree=tree_seams(n,seams)
+    rng=random.Random(n)
+    for _ in range(6):
+        weights=[[rng.randrange(1,100) for _ in range(12)] for _ in range(n)]
+        state=[F(w,sum(line)) for line in weights for w in line]
+        means=list(state)
+        for _,a,b in seams: means[a]=means[b]=(state[a]+state[b])/2
+        chords={e:(state[a]-state[b])/2 for e,(_,a,b) in enumerate(seams) if e not in tree}
+        assert len(chords)==5*n+1
+        assert recover(n,seams,means,chords)==state
+        missing=dict(chords);missing.pop(next(iter(missing)))
+        with pytest.raises(ValueError): recover(n,seams,means,missing)
+        bad=list(means);bad[0]+=1
+        with pytest.raises(ValueError): recover(n,seams,bad,chords)
+        with pytest.raises(ValueError): recover(n,seams,list(map(float,means)),chords)
+        with pytest.raises(ValueError): recover(n,seams[:-1],means,chords)
