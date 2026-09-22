@@ -793,7 +793,7 @@ def _source_dynamics(
         if len(selected_indices) != len(set(selected_indices)):
             raise RuntimeError("repair cycle selected a seam more than once")
         selected_endpoint_count = 0
-        cycle_commits: list[tuple[int, int, int, int, float, float, Any]] = []
+        cycle_commits: list[tuple[int, int, int, int, float, float, float, Any]] = []
         cycle_noops = 0
         selected_material: list[str] = []
         endpoint_keys: set[tuple[int, int]] = set()
@@ -826,12 +826,13 @@ def _source_dynamics(
                     right_port,
                     left_value,
                     right_value,
+                    average,
                     seam,
                 )
             )
 
         reverse_replay = np.array(state_before, copy=True)
-        for left, left_port, right, right_port, _, _, _ in reversed(cycle_commits):
+        for left, left_port, right, right_port, _, _, _, _ in reversed(cycle_commits):
             average = 0.5 * (
                 float(state_before[left, left_port])
                 + float(state_before[right, right_port])
@@ -846,6 +847,7 @@ def _source_dynamics(
             right_port,
             left_value,
             right_value,
+            average,
             seam,
         ) in enumerate(cycle_commits):
             if (
@@ -854,7 +856,6 @@ def _source_dynamics(
             ):
                 union_atomic_revalidation = False
                 continue
-            average = 0.5 * (left_value + right_value)
             repaired[left, left_port] = average
             repaired[right, right_port] = average
             versions[left, left_port] += 1
@@ -917,7 +918,7 @@ def _source_dynamics(
             order_replay_exact and np.array_equal(reverse_replay, repaired)
         )
         idempotence_probe = np.array(repaired, copy=True)
-        for left, left_port, right, right_port, _, _, _ in cycle_commits:
+        for left, left_port, right, right_port, _, _, _, _ in cycle_commits:
             average = 0.5 * (
                 float(idempotence_probe[left, left_port])
                 + float(idempotence_probe[right, right_port])

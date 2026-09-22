@@ -32,6 +32,10 @@ single-log antichain diagnostic to an all-word classification and an exact
 read-algebra computation. It does not claim the complete primitive alphabet
 is the canonical A3 constraint grammar.
 
+A word visiting s distinct seams has ideal ambient rank 12N-s. Its receipt
+reports this actual word rank separately from the full-sweep rank 6N;
+short captures do not already have the rank of a completed sweep.
+
 With retained initial samples, one carrier can recover its twelve partner
 values by subtracting its own value from twice the mean. On normalized
 preparations the complete one-carrier read rank is 23. The checker also

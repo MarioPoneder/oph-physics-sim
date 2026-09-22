@@ -34,6 +34,23 @@ def test_native_driver_binding_and_complete_replay(packet):
     assert receipt["M1_derived"] is False
 
 
+def test_partial_word_rank_is_computed_from_its_actual_projection(packet):
+    # Construct the operator on a basis, then eliminate; a full-sweep constant
+    # is incorrect before the word has visited every seam.
+    receipt = check.verify(packet)
+    for raw, result in zip(packet['cases'], receipt['cases']):
+        size = 12*raw['carriers']
+        matrix = [[F(int(i == j)) for j in range(size)] for i in range(size)]
+        budget = (len(raw['seams'])+15)//16
+        for attempt in range(raw['cycles']*budget):
+            _, a, b = raw['seams'][raw['order'][attempt % len(raw['order'])]]
+            mean = [(u+v)/2 for u,v in zip(matrix[a],matrix[b])]
+            matrix[a],matrix[b] = list(mean),list(mean)
+        assert result['terminal_real_projection_rank'] == check.rank(matrix)
+        assert result['full_sweep_real_projection_rank'] == 6*raw['carriers']
+    assert [r['terminal_real_projection_rank'] for r in receipt['cases'][:3]] == [40,32,24]
+
+
 @pytest.mark.parametrize("path,value", [
     (("scope", "M1_derived"), True),
     (("cases", 0, "carriers"), True),
@@ -186,6 +203,24 @@ def test_native_threshold_has_an_exact_affinity_defect():
         mean = _visible_pair_mean(x, 1-x)
         return x if mean is None else mean
     assert first(.5+delta)-(first(.5)+first(.5+2*delta))/2 == delta
+
+
+def test_native_driver_commits_the_instrument_primitive_return_value(monkeypatch):
+    from oph_fpe.bulk import physical_h3_kms_source_capture as driver
+    original = driver._visible_pair_mean
+    # A mutation must reach actual ledger writes, not merely the no-op gate.
+    monkeypatch.setattr(driver, '_visible_pair_mean',
+                        lambda a,b: None if original(a,b) is None else .25)
+    config = driver._normalize_config({'carrier_count':4,'cycles':4,'seed':1729})
+    dynamics, _, _, final, events = driver._source_dynamics(config,driver._build_federation(config))
+    assert dynamics['repair_event_count'] > 0
+    assert dynamics['REPAIR_ORDER_REPLAY_EXACT_RECEIPT'] is False
+    assert events
+    for event in events:
+        for write in event['write_set']:
+            assert write['value'] == .25
+            carrier = int(write['carrier_id'].rsplit('-',1)[1])
+            assert final[carrier,write['port']] == .25
 
 
 def test_terminal_lift_keeps_the_registered_arithmetic():

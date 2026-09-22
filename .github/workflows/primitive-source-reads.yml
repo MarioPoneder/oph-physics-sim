@@ -26,6 +26,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[test]"
-      - run: python -m pytest -q tests/test_primitive_source_reads.py tests/test_ordered_port_response_diagnostic.py
+      - run: python -m pytest -q tests/test_primitive_source_reads.py tests/test_ordered_port_response_diagnostic.py tests/test_physical_h3_kms_source_capture.py
       - run: python -m oph_fpe.bulk.primitive_source_reads runs/primitive-source-reads.json
       - run: python -m oph_fpe.bulk.verify_primitive_source_reads_independent runs/primitive-source-reads.json --source-root .

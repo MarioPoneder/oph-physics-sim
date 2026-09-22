@@ -2,7 +2,8 @@
 
 The existing source driver is executed unchanged. The compact export contains
 its complete repair-log commitment and the inputs needed for independent replay.
-No new dynamics, quantum repair instrument, or M1 geometry is introduced.
+Constructed instrument and archive controls are exported separately; none is
+substituted into the native driver or identified with selected M1 geometry.
 """
 from __future__ import annotations
 
