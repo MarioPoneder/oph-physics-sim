@@ -135,3 +135,22 @@ def test_source_custody_rejects_real_file_tampering(packet, tmp_path):
     target.write_bytes(target.read_bytes()+b"\n# changed source\n")
     with pytest.raises(ValueError, match="source custody"):
         check.verify(packet, tmp_path)
+
+
+def test_skipped_pairs_are_not_committed_record_parents(packet):
+    # A valid uniform preparation at the same operation interface, independent
+    # of the Gaussian seed. Every attempt is a no-op, so no committed writer
+    # can appear in the actual record graph even though the ideal word visits it.
+    row = deepcopy(packet["cases"][2])
+    row["initial_hex"] = row["final_hex"] = [(1/12).hex()]*48
+    row["commits"], row["noops"] = 0, 32
+    row["cycle_counts"] = [[0, 2]]*16
+    row["native_log_sha256"] = "sha256:"+hashlib.sha256(b"").hexdigest()
+    port = 0
+    values = [check.clean(1/12)]*12
+    for record in row["observer_records"]:
+        record[3], record[4] = port, [v.hex() for v in values]
+        port = (port+1+abs(round(1e6*sum((j+1)*v for j,v in enumerate(values))))%11)%12
+    result = check.case(row, (4,16,1))
+    assert result["observer_payload"]["repair_to_record_edges"] == []
+    assert result["maximum_version"] == 0

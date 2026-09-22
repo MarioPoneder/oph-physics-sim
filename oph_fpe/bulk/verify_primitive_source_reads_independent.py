@@ -167,7 +167,7 @@ def case(row, spec):
     versions, touched, activated = [0]*size, set(), set()
     log_hasher = hashlib.sha256()
     commits = noops = 0
-    cycle_counts, snapshots, touched_at = [], [], []
+    cycle_counts, snapshots, touched_at, committed_at = [], [], [], []
     for cycle in range(cycles):
         done = skipped = 0
         for offset in range(budget):
@@ -206,6 +206,7 @@ def case(row, spec):
         noops += skipped
         snapshots.append(list(x))
         touched_at.append(set(touched))
+        committed_at.append(set(activated))
     equal(row["cycle_counts"], cycle_counts, "complete attempt accounting")
     equal([row["commits"], row["noops"]], [commits, noops], "native operation counts")
     equal(row["final_hex"], [v.hex() for v in x], "native terminal ledger")
@@ -240,8 +241,9 @@ def case(row, spec):
             full_row = [F(0)]*size
             if repaired:
                 full_row[slot] = full_row[mate[slot]] = F(1,2)
+            if slot in committed_at[cycle]:
                 parents.add(seam_of[slot])
-            else:
+            if not repaired:
                 full_row[slot] = 1
             read_rows.append([full_row[12*c+p]-full_row[12*c+11]
                               for c in range(n) for p in range(11)])
@@ -262,7 +264,7 @@ def case(row, spec):
                 "maximal_payload_algebra": read_algebra(n, mate, set(range(size)), receivers)},
             "native_noop_threshold": str(F(1e-15)),
             "native_committed_inverse_absolute_error_bound": str(F(1, 2**51)),
-            "rounded_record_inverse_absolute_error_bound": str(F(1, 2**51)+F(3, 2*10**15))}
+            "rounded_record_inverse_absolute_error_bound": str(F(1, 2**50)+F(3, 2*10**15))}
 
 
 def multiply(a, b):
