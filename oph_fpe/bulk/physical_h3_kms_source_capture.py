@@ -694,6 +694,18 @@ def _record_commit_schedule(cycles: int, count: int) -> tuple[int, ...]:
     return schedule
 
 
+def _visible_pair_mean(left: float, right: float) -> float | None:
+    """The registered visible-ledger primitive; None denotes a skipped attempt."""
+    if abs(left - right) <= 1.0e-15:
+        return None
+    return 0.5 * (left + right)
+
+
+def _terminal_complex_lift(amplitudes: np.ndarray, visible: np.ndarray) -> np.ndarray:
+    """Registered phase-preserving projection, not an asserted quantum channel."""
+    return np.sqrt(np.maximum(visible, 0.0)) * np.exp(1j * np.angle(amplitudes))
+
+
 def _source_dynamics(
     config: Mapping[str, Any], federation: EchosahedralFederation
 ) -> tuple[
@@ -801,11 +813,11 @@ def _source_dynamics(
             right_value = float(state_before[right, right_port])
             before = abs(left_value - right_value)
             selected_material.append(seam.seam_id)
-            if before <= 1.0e-15:
+            average = _visible_pair_mean(left_value, right_value)
+            if average is None:
                 cycle_noops += 1
                 noop_count += 1
                 continue
-            average = 0.5 * (left_value + right_value)
             cycle_commits.append(
                 (
                     left,
@@ -960,8 +972,7 @@ def _source_dynamics(
                 )
             )
         )
-    phases = np.angle(state.amplitudes)
-    terminal_lift = np.sqrt(np.maximum(repaired, 0.0)) * np.exp(1j * phases)
+    terminal_lift = _terminal_complex_lift(state.amplitudes, repaired)
     audit = local_a5_dynamics_report(
         intrinsic_step=config["intrinsic_step"],
         coupling_strength=config["coupling_strength"],
